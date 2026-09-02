@@ -4,17 +4,18 @@ Local farm-stand directory for Pasco, Hernando, and north Pinellas.
 
 Customers find stands, follow them, and leave notes that go live immediately. Stands reply, post specials, and send a note to followers. False notes get flagged into an admin queue.
 
-## Use it
+## Live
 
-Open `index.html` in a browser, or enable GitHub Pages on this repo (Settings → Pages → Deploy from branch → `main` / root).
+- App: https://stand-local.grok.me
+- Build chat: https://grok.com/c/b54bfaee-d2d0-4a34-b533-dccfad8e47fa
+
+This repo is the Vite/React export from that Grok Build. Locally: `npm install && npm run dev`.
 
 ## Roles
 
-- **Customer** — map, search, follow, live notes
-- **My stand** — claim a listing, post specials, reply, message followers
-- **Admin** — PIN `porch-admin` (change it in `index.html` before you share). Take down or keep flagged notes. Set featured stands.
-
-Data lives in the browser (`localStorage`) until a shared backend is wired. The 103-stand catalog is in the page.
+- **Customer** – map, search, follow, live notes
+- **My stand** – claim a listing, post specials, reply, message followers
+- **Admin** – PIN `porch-admin` (change it before you share). Take down or keep flagged notes. Set featured stands.
 
 ## Revenue (no ad stack)
 

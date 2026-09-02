@@ -1,0 +1,108 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --color-paper: #f3efe6;
+  --color-surface: #fbf8f1;
+  --color-ink: #1c2418;
+  --color-muted: #6b6458;
+  --color-forest: #2f4a38;
+  --color-sage: #5d7a62;
+  --color-border: #ddd4c4;
+  --color-chip: #e8e1d4;
+  --color-rust: #8f3a2a;
+  --color-gold: #b08a3c;
+  --color-background: #f3efe6;
+  --color-foreground: #1c2418;
+  --color-primary: #2f4a38;
+  --color-primary-foreground: #f3efe6;
+  --color-card: #fbf8f1;
+  --color-card-foreground: #1c2418;
+  --color-accent: #2f4a38;
+  --color-accent-foreground: #f3efe6;
+  --color-muted-foreground: #6b6458;
+  --color-secondary: #e8e1d4;
+  --color-secondary-foreground: #1c2418;
+  --color-destructive: #8f3a2a;
+  --color-ring: #2f4a38;
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
+  --font-sans: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    height: 100%;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    min-height: 100dvh;
+    height: 100%;
+    background: var(--color-paper);
+    color: var(--color-ink);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    font-family: var(--font-display);
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: var(--color-chip);
+  height: 100%;
+  width: 100%;
+}
+
+.leaflet-control-zoom a {
+  background: var(--color-surface) !important;
+  color: var(--color-ink) !important;
+  border-color: var(--color-border) !important;
+}
+
+.stand-pin {
+  background: transparent;
+  border: 0;
+}
+
+.stand-pin-dot {
+  width: 18px;
+  height: 18px;
+  margin: 5px;
+  border-radius: 999px;
+  background: var(--color-forest);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-paper) 85%, transparent);
+}
+
+.stand-pin-dot.is-featured {
+  background: var(--color-rust);
+  width: 22px;
+  height: 22px;
+  margin: 3px;
+}
+
+.stand-pin-dot.is-active {
+  box-shadow: 0 0 0 4px var(--color-gold);
+}
