@@ -6,8 +6,8 @@ import {
   parseIncomingList, type SuggestedItem, type Unit,
 } from "@/lib/inventory/parse-list";
 import {
-  duplicateYesterday, listItems, publishSuggestions, removeItem, replacePreorderSheet,
-  snapshotBoard, suggestFromBoard, upsertItem,
+  duplicateYesterday, listDemoItems, listItems, publishSuggestions, removeDemoItem, removeItem,
+  replacePreorderSheet, snapshotBoard, suggestFromBoard, upsertDemoItem, upsertItem,
 } from "@/lib/stands/owner";
 import type { InventoryItem } from "@/lib/stands/types";
 
@@ -42,18 +42,19 @@ function downloadSample() {
   const blob = new Blob([SAMPLE_SHEET_CSV], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "standlocal-items.csv";
+  a.download = "standstrong-items.csv";
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
-export function InventoryDesk({ standId, onRefresh }: { standId: string; onRefresh?: () => void }) {
+export function InventoryDesk({ standId, onRefresh, guestDemo = false }: { standId: string; onRefresh?: () => void; guestDemo?: boolean }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [paste, setPaste] = useState("");
   const [suggested, setSuggested] = useState<SuggestedItem[]>([]);
   const [note, setNote] = useState("");
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
+  const [qty, setQty] = useState("12");
   const [unit, setUnit] = useState("each");
   const [busy, setBusy] = useState(false);
   const [photoLabel, setPhotoLabel] = useState("");
@@ -65,9 +66,9 @@ export function InventoryDesk({ standId, onRefresh }: { standId: string; onRefre
   const sheetItems = items.filter((i) => i.preorderable);
 
   async function reload() {
-    setItems(await listItems({ data: { standId } }));
+    setItems(guestDemo ? await listDemoItems({ data: { standId } }) : await listItems({ data: { standId } }));
   }
-  useEffect(() => { void reload(); }, [standId]);
+  useEffect(() => { void reload(); }, [standId, guestDemo]);
 
   function patchSuggested(index: number, partial: Partial<SuggestedItem>) {
     setSuggested((prev) => prev.map((s, i) => (i === index ? { ...s, ...partial } : s)));
@@ -75,13 +76,17 @@ export function InventoryDesk({ standId, onRefresh }: { standId: string; onRefre
 
   async function addManual() {
     const cents = dollarsToCents(price);
+    const maxQty = Math.max(0, Math.min(999, Number(qty) || 0));
     if (!name.trim() || cents == null) return;
     setBusy(true);
     try {
-      await upsertItem({
-        data: { standId, name: name.trim(), unit, priceCents: cents, status: "in", preorderable: false, decrementOnSale: true },
-      });
-      setName(""); setPrice("");
+      const payload = {
+        standId, name: name.trim(), unit, priceCents: cents, status: "in" as const,
+        preorderable: false, decrementOnSale: true, maxQty,
+      };
+      if (guestDemo) await upsertDemoItem({ data: payload });
+      else await upsertItem({ data: payload });
+      setName(""); setPrice(""); setQty("12");
       await reload();
       onRefresh?.();
     } finally { setBusy(false); }
@@ -118,28 +123,22 @@ export function InventoryDesk({ standId, onRefresh }: { standId: string; onRefre
   }
 
   return (
-    <div className="flex flex-col gap-5 pb-8">
-      <header>
-        <h2 className="font-display text-2xl font-semibold">Today's board</h2>
-        <p className="text-sm text-muted">
-          Type, paste from a spreadsheet, or photograph the chalkboard. Shoppers tally from this board.
-        </p>
-      </header>
-
+    <div className="flex flex-col gap-4 pb-8">
       <section className="grid gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">Add one</p>
-        <Input placeholder="Item name" value={name} onChange={(e) => setName(e.target.value)} />
-        <div className="grid grid-cols-[1fr_7rem] gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">Add item</p>
+        <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <div className="grid grid-cols-3 gap-2">
           <Input inputMode="decimal" placeholder="Price" value={price} onChange={(e) => setPrice(e.target.value)} />
-          <select className="h-11 rounded-xl border border-border bg-surface px-2" value={unit} onChange={(e) => setUnit(e.target.value)}>
+          <Input inputMode="numeric" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} />
+          <select className="h-11 rounded-[10px] border border-border bg-surface px-2 text-sm" value={unit} onChange={(e) => setUnit(e.target.value)}>
             {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
-        <Button className="h-14" disabled={busy} onClick={() => void addManual()}>Add to board</Button>
+        <Button className="h-12" disabled={busy} onClick={() => void addManual()}>Add to stand</Button>
       </section>
 
-      <section className="grid gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">Paste, spreadsheet, or photo</p>
+      <details className="grid gap-2">
+        <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-muted">Paste, spreadsheet, or photo</summary>
         <Textarea placeholder={"name,unit,price,preorder\nRaw 5oz honey,jar,10,no\nEggs,dozen,6,yes"} value={paste} onChange={(e) => setPaste(e.target.value)} />
         <div className="flex flex-wrap gap-2">
           <label className="flex h-14 flex-1 items-center justify-center rounded-2xl border border-border bg-surface text-sm">
@@ -175,8 +174,10 @@ export function InventoryDesk({ standId, onRefresh }: { standId: string; onRefre
           />
         </label>
         {photoLabel && <p className="text-xs text-muted">{busy ? "Reading the board…" : `Photo: ${photoLabel}`}</p>}
-        <Button className="h-14" variant="outline" disabled={busy || (!paste.trim() && !imageDataUrl)} onClick={() => void readBoard()}>Suggest rows</Button>
-      </section>
+        {!guestDemo && (
+          <Button className="h-14" variant="outline" disabled={busy || (!paste.trim() && !imageDataUrl)} onClick={() => void readBoard()}>Suggest rows</Button>
+        )}
+      </details>
 
       <SuggestList
         rows={suggested}
@@ -200,22 +201,24 @@ export function InventoryDesk({ standId, onRefresh }: { standId: string; onRefre
         action="Confirm & publish"
       />
 
-      <section className="flex flex-wrap gap-2">
-        {SEASONAL_TEMPLATES.map((t) => (
-          <button key={t.label} type="button" className="rounded-full bg-chip px-3 py-2 text-sm" onClick={() => { setSuggested(t.items); setNote("Edit any row, then publish."); }}>
-            {t.label}
-          </button>
-        ))}
-        <Button variant="outline" size="sm" onClick={() => void snapshotBoard({ data: { standId } })}>Save board</Button>
-        <Button variant="outline" size="sm" onClick={async () => { await duplicateYesterday({ data: { standId } }); await reload(); }}>Duplicate yesterday</Button>
-      </section>
+      {!guestDemo && (
+        <section className="flex flex-wrap gap-2">
+          {SEASONAL_TEMPLATES.map((t) => (
+            <button key={t.label} type="button" className="rounded-full bg-chip px-3 py-2 text-sm" onClick={() => { setSuggested(t.items); setNote("Edit any row, then publish."); }}>
+              {t.label}
+            </button>
+          ))}
+          <Button variant="outline" size="sm" onClick={() => void snapshotBoard({ data: { standId } })}>Save board</Button>
+          <Button variant="outline" size="sm" onClick={async () => { await duplicateYesterday({ data: { standId } }); await reload(); }}>Duplicate yesterday</Button>
+        </section>
+      )}
 
       <section>
         <p className="text-xs font-medium uppercase tracking-wide text-muted">Walk-up board</p>
         {boardItems.length === 0 && <p className="mt-2 text-sm text-muted">Nothing on the walk-up board yet.</p>}
         <ul className="divide-y divide-border">
           {boardItems.map((it) => (
-            <LiveItem key={it.id} item={it} standId={standId} busy={busy} onBusy={setBusy} onReload={async () => { await reload(); onRefresh?.(); }} />
+            <LiveItem key={it.id} item={it} standId={standId} busy={busy} guestDemo={guestDemo} onBusy={setBusy} onReload={async () => { await reload(); onRefresh?.(); }} />
           ))}
         </ul>
       </section>
@@ -260,7 +263,7 @@ export function InventoryDesk({ standId, onRefresh }: { standId: string; onRefre
         {sheetItems.length === 0 && <p className="text-sm text-muted">No preorder sheet yet.</p>}
         <ul className="divide-y divide-border">
           {sheetItems.map((it) => (
-            <LiveItem key={it.id} item={it} standId={standId} busy={busy} onBusy={setBusy} onReload={async () => { await reload(); onRefresh?.(); }} />
+            <LiveItem key={it.id} item={it} standId={standId} busy={busy} guestDemo={guestDemo} onBusy={setBusy} onReload={async () => { await reload(); onRefresh?.(); }} />
           ))}
         </ul>
       </section>
@@ -327,42 +330,46 @@ function PriceField({ cents, onCents }: { cents: number; onCents: (n: number) =>
 }
 
 function LiveItem({
-  item, standId, busy, onBusy, onReload,
+  item, standId, busy, onBusy, onReload, guestDemo = false,
 }: {
   item: InventoryItem; standId: string; busy: boolean;
-  onBusy: (v: boolean) => void; onReload: () => Promise<void>;
+  onBusy: (v: boolean) => void; onReload: () => Promise<void>; guestDemo?: boolean;
 }) {
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(centsToPriceInput(item.priceCents));
   const [unit, setUnit] = useState(item.unit);
+  const [qty, setQty] = useState(item.maxQty == null ? "" : String(item.maxQty));
   useEffect(() => {
     setName(item.name);
     setPrice(centsToPriceInput(item.priceCents));
     setUnit(item.unit);
-  }, [item.id, item.name, item.priceCents, item.unit]);
+    setQty(item.maxQty == null ? "" : String(item.maxQty));
+  }, [item.id, item.name, item.priceCents, item.unit, item.maxQty]);
 
   const cents = dollarsToCents(price);
-  const dirty = name.trim() !== item.name || unit !== item.unit || (cents != null && cents !== item.priceCents);
+  const parsedQty = qty.trim() === "" ? null : Math.max(0, Math.min(999, Number(qty) || 0));
+  const dirty = name.trim() !== item.name || unit !== item.unit || (cents != null && cents !== item.priceCents) || parsedQty !== item.maxQty;
 
   async function save(extra?: Partial<InventoryItem>) {
     const nextCents = extra?.priceCents ?? cents ?? item.priceCents;
     const nextName = (extra?.name ?? name).trim() || item.name;
+    const nextQty = extra?.maxQty !== undefined ? extra.maxQty : parsedQty;
     onBusy(true);
     try {
-      await upsertItem({
-        data: {
-          ...item,
-          standId,
-          id: item.id,
-          name: nextName,
-          unit: extra?.unit ?? unit,
-          priceCents: nextCents,
-          status: extra?.status ?? item.status,
-          preorderable: extra?.preorderable ?? item.preorderable,
-          photo: item.photo,
-          maxQty: item.maxQty,
-        },
-      });
+      const payload = {
+        ...item,
+        standId,
+        id: item.id,
+        name: nextName,
+        unit: extra?.unit ?? unit,
+        priceCents: nextCents,
+        status: extra?.status ?? item.status,
+        preorderable: extra?.preorderable ?? item.preorderable,
+        photo: item.photo,
+        maxQty: nextQty,
+      };
+      if (guestDemo) await upsertDemoItem({ data: payload });
+      else await upsertItem({ data: payload });
       await onReload();
     } finally { onBusy(false); }
   }
@@ -370,15 +377,20 @@ function LiveItem({
   return (
     <li className="flex flex-col gap-2 py-3">
       <Input value={name} onChange={(e) => setName(e.target.value)} />
-      <div className="grid grid-cols-[1fr_7rem] gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <Input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
-        <select className="h-11 rounded-xl border border-border bg-surface px-2" value={unit} onChange={(e) => setUnit(e.target.value)}>
+        <Input inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Qty" />
+        <select className="h-11 rounded-[10px] border border-border bg-surface px-2 text-sm" value={unit} onChange={(e) => setUnit(e.target.value)}>
           {unitOptions(unit).map((u) => <option key={u} value={u}>{u}</option>)}
         </select>
       </div>
       <div className="flex flex-wrap items-center gap-1">
         <Button className="h-11" disabled={busy || !dirty || !name.trim() || cents == null} onClick={() => void save()}>Save</Button>
-        <button type="button" className="h-11 rounded-xl px-3 text-sm text-muted underline" onClick={async () => { await removeItem({ data: { standId, id: item.id } }); await onReload(); }}>Remove</button>
+        <button type="button" className="h-11 rounded-xl px-3 text-sm text-muted underline" onClick={async () => {
+          if (guestDemo) await removeDemoItem({ data: { standId, id: item.id } });
+          else await removeItem({ data: { standId, id: item.id } });
+          await onReload();
+        }}>Remove</button>
       </div>
       <div className="flex flex-wrap gap-1">
         {(["in", "low", "out"] as const).map((st) => (

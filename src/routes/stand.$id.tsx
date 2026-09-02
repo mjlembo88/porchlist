@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { StandDetail } from "@/components/stand-detail";
 import { getStandBundle } from "@/lib/stands/server";
-import { SLOGAN } from "@/lib/stands/types";
+import { APP_NAME, SLOGAN } from "@/lib/stands/types";
 
 export const Route = createFileRoute("/stand/$id")({
   loader: ({ params }) => getStandBundle({ data: { id: params.id } }),
@@ -24,7 +24,7 @@ function StandPage() {
     <main className="min-h-dvh bg-paper text-ink">
       <header className="border-b border-border px-4 py-3">
         <Link to="/" className="text-sm text-muted">← Map</Link>
-        <p className="font-display text-lg font-semibold">StandLocal</p>
+        <p className="font-display text-lg font-semibold">{APP_NAME}</p>
         <p className="text-xs italic text-forest">{SLOGAN}</p>
       </header>
       <div className="mx-auto max-w-lg p-4 pb-20">

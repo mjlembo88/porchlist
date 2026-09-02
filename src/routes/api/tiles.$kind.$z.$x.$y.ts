@@ -9,7 +9,7 @@ export const Route = createFileRoute("/api/tiles/$kind/$z/$x/$y")({
         const y = params.y.replace(/\.png$/i, "");
         const url = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
         const res = await fetch(url, {
-          headers: { "User-Agent": "StandLocal/1.0 (https://standlocal.app; farm-stand map)" },
+          headers: { "User-Agent": "StandStrong/1.0 (farm-stand map)" },
         });
         if (!res.ok) {
           return new Response("tile missing", { status: res.status });

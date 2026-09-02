@@ -1,4 +1,4 @@
--- StandLocal marketplace schema
+-- StandStrong marketplace schema
 create table if not exists stands (
   id text primary key,
   name text not null,

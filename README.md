@@ -1,28 +1,16 @@
-# Porchlist
+# StandStrong
 
-Local farm-stand directory for Pasco, Hernando, and north Pinellas.
+Yelp × Etsy for farm stands on the Nature Coast — Pasco, Hernando, and north Pinellas.
 
-Customers find stands, follow them, and leave notes that go live immediately. Stands reply, post specials, and send a note to followers. False notes get flagged into an admin queue.
-
-## Live
-
-- App: https://stand-local.grok.me
-- Build chat: https://grok.com/c/b54bfaee-d2d0-4a34-b533-dccfad8e47fa
-
-This repo is the Vite/React export from that Grok Build. Locally: `npm install && npm run dev`.
+Shoppers browse compact cards with star ratings, leave a short note, and send a pickup or preorder. Owners post inventory (name, price, qty, unit) and work a queue: accept, then fulfill. Pay at pickup.
 
 ## Roles
 
-- **Customer** – map, search, follow, live notes
-- **My stand** – claim a listing, post specials, reply, message followers
-- **Admin** – PIN `porch-admin` (change it before you share). Take down or keep flagged notes. Set featured stands.
+- **Browse** — list and map, ratings on every card
+- **Stand page** — cart, checkout sheet, neighbor notes
+- **My stand** — order queue and stock. Open the Three Dog Farm demo desk without signing in, or sign in to run a granted listing
+- **Admin** — PIN `stand-admin`
 
-## Revenue (no ad stack)
+## Stack
 
-- Claim / Porchlist Pro: about $12/month when payments go live
-- Featured week: about $25, one stand per area
-- No interstitials, no sidebar banners
-
-## Source
-
-Stand list transcribed from a local porch-stand directory circulating August 2026. Hours and menus change.
+Vite + React + TanStack Start. No payment secrets in the tree. Cash at the stand is always fine.

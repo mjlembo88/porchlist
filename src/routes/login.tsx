@@ -18,7 +18,7 @@ function Login() {
         <Link to="/" className="text-sm text-muted">← Map</Link>
         <h1 className="font-display text-3xl font-semibold">Owner sign in</h1>
         <p className="text-sm text-muted">
-          Shoppers stay free. Sign in only to run a listing StandLocal has granted you.
+          Shoppers stay free. Sign in only to run a listing StandStrong has granted you.
         </p>
         <p className="text-xs italic text-forest">{SLOGAN}</p>
         {authEnabled ? (

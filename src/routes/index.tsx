@@ -1,15 +1,16 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { Heart, List, Map as MapIcon, Store, X } from "lucide-react";
+import { Heart, List, Map as MapIcon, Store } from "lucide-react";
 import { FollowingFeed } from "@/components/following-feed";
 import { OwnerDesk } from "@/components/owner-desk";
 import { StandDetail } from "@/components/stand-detail";
 import { StandList } from "@/components/stand-list";
 import { StandMap } from "@/components/stand-map";
 import { Input } from "@/components/ui/input";
+import { BottomSheet } from "@/components/ui/sheet";
 import { canRunAds, isFeaturedPlan } from "@/lib/billing/plans";
 import { listStands } from "@/lib/stands/server";
-import { SLOGAN, TAGLINE, isOpenToday, type FarmStand } from "@/lib/stands/types";
+import { APP_NAME, SLOGAN, TAGLINE, isOpenToday, type FarmStand } from "@/lib/stands/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
@@ -17,17 +18,12 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-type Tab = "map" | "list" | "follow" | "desk";
+type Tab = "list" | "map" | "follow" | "desk";
 
 const FILTERS: { id: string; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "open", label: "Open today" },
+  { id: "open", label: "Open" },
   { id: "featured", label: "Featured" },
-  { id: "walk-up", label: "Walk-up" },
-  { id: "preorder", label: "Preorder" },
-  { id: "eggs", label: "Eggs" },
-  { id: "bread", label: "Bread" },
-  { id: "produce", label: "Produce" },
   { id: "Pasco", label: "Pasco" },
   { id: "Hernando", label: "Hernando" },
   { id: "Pinellas", label: "Pinellas" },
@@ -36,7 +32,7 @@ const FILTERS: { id: string; label: string }[] = [
 function Home() {
   const stands = Route.useLoaderData() as FarmStand[];
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("map");
+  const [tab, setTab] = useState<Tab>("list");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("open");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,17 +44,19 @@ function Home() {
     return stands.filter((s) => {
       if (filter === "open" && !isOpenToday(s.hours)) return false;
       if (filter === "featured" && !s.featured && !isFeaturedPlan(s.plan)) return false;
-      if (filter === "walk-up" && s.access !== "walk-up") return false;
-      if (filter === "preorder" && s.access !== "preorder") return false;
-      if (filter === "eggs" && !s.products.some((p) => p.toLowerCase().includes("egg"))) return false;
-      if (filter === "bread" && !s.products.some((p) => /bread|bagel|sourdough/i.test(p))) return false;
-      if (filter === "produce" && !s.products.some((p) => /produce|berr|fruit|tomato/i.test(p))) return false;
       if (filter === "Pasco" || filter === "Hernando" || filter === "Pinellas") {
         if (s.county !== filter) return false;
       }
       if (!q) return true;
       const blob = [s.name, s.city, s.address, s.products.join(" "), s.notes].filter(Boolean).join(" ").toLowerCase();
       return blob.includes(q);
+    }).sort((a, b) => {
+      const feat = Number(isFeaturedPlan(b.plan) || b.featured) - Number(isFeaturedPlan(a.plan) || a.featured);
+      if (feat) return feat;
+      if (b.reviewCount !== a.reviewCount && (a.reviewCount === 0 || b.reviewCount === 0)) return b.reviewCount - a.reviewCount;
+      const rating = (b.ratingAvg || 0) - (a.ratingAvg || 0);
+      if (rating) return rating;
+      return a.name.localeCompare(b.name);
     });
   }, [stands, query, filter]);
 
@@ -76,11 +74,11 @@ function Home() {
 
   return (
     <main className="flex h-dvh flex-col bg-paper text-ink">
-      <header className="relative z-30 border-b border-border bg-paper px-4 py-3 sm:px-5">
+      <header className="sticky top-0 z-30 border-b border-border bg-paper px-4 py-2.5 sm:px-5">
         <div className="flex items-center gap-2.5">
           <span className="grid size-9 place-items-center rounded-xl bg-forest font-display text-lg font-semibold text-paper">S</span>
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-lg font-semibold leading-none">StandLocal</h1>
+            <h1 className="font-display text-lg font-semibold leading-none">{APP_NAME}</h1>
             <p className="mt-1 truncate text-xs italic text-forest">{SLOGAN}</p>
           </div>
           {tab === "map" && (
@@ -93,7 +91,27 @@ function Home() {
             </button>
           )}
         </div>
-        <p className="mt-1 text-xs text-muted">{TAGLINE} · {stands.length} on the map</p>
+        <p className="mt-1 text-xs text-muted">{TAGLINE} · Pasco, Hernando, north Pinellas</p>
+        {(tab === "list" || tab === "map") && (
+          <div className="mt-2 space-y-2">
+            <Input value={query} placeholder="Search eggs, sourdough, a town…" onChange={(e) => setQuery(e.target.value)} />
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              {FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFilter(f.id)}
+                  className={cn(
+                    "h-9 shrink-0 rounded-full px-3 text-xs font-medium",
+                    filter === f.id ? "bg-forest text-paper" : "bg-chip text-muted",
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="relative min-h-0 flex-1">
@@ -103,24 +121,6 @@ function Home() {
 
         {tab === "list" && (
           <div className="flex h-full flex-col overflow-hidden">
-            <div className="space-y-3 border-b border-border p-3">
-              <Input value={query} placeholder="Search eggs, sourdough…" onChange={(e) => setQuery(e.target.value)} />
-              <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-                {FILTERS.map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setFilter(f.id)}
-                    className={cn(
-                      "h-9 shrink-0 rounded-full px-3 text-xs font-medium",
-                      filter === f.id ? "bg-forest text-paper" : "bg-chip text-muted",
-                    )}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            </div>
             {ads[0] && (
               <p className="border-b border-border bg-chip px-3 py-2 text-xs text-muted">
                 Featured · {ads[0].name}{ads[0].city ? ` in ${ads[0].city}` : ""}
@@ -149,32 +149,34 @@ function Home() {
             />
           </div>
         )}
-
-        {showDetail && selected && (
-          <div className="absolute inset-0 z-20 overflow-y-auto bg-paper">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-paper px-3 py-2">
-              <button type="button" className="inline-flex h-11 items-center gap-1 text-sm" onClick={() => setShowDetail(false)}>
-                <X className="size-4" /> Close
-              </button>
-            </div>
-            <div className="mx-auto max-w-lg p-4 pb-28">
-              <StandDetail
-                stand={selected}
-                onAskOwner={() => {
-                  setRequestStandId(selected.id);
-                  setShowDetail(false);
-                  setTab("desk");
-                }}
-              />
-            </div>
-          </div>
-        )}
       </div>
 
+      <BottomSheet
+        open={showDetail && Boolean(selected)}
+        onOpenChange={(open) => {
+          setShowDetail(open);
+          if (!open) setSelectedId((cur) => cur);
+        }}
+        title={selected?.name ?? "Stand"}
+        description={selected ? `${selected.city ?? "Area"}${selected.county ? ` · ${selected.county}` : ""}` : undefined}
+      >
+        {selected && (
+          <StandDetail
+            compact
+            stand={selected}
+            onAskOwner={() => {
+              setRequestStandId(selected.id);
+              setShowDetail(false);
+              setTab("desk");
+            }}
+          />
+        )}
+      </BottomSheet>
+
       <nav className="grid grid-cols-4 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)]">
+        <NavBtn icon={List} label="Browse" active={tab === "list"} onClick={() => { setTab("list"); setShowDetail(false); }} />
         <NavBtn icon={MapIcon} label="Map" active={tab === "map"} onClick={() => { setTab("map"); setShowDetail(false); }} />
-        <NavBtn icon={List} label="List" active={tab === "list"} onClick={() => { setTab("list"); setShowDetail(false); }} />
-        <NavBtn icon={Heart} label="Following" active={tab === "follow"} onClick={() => { setTab("follow"); setShowDetail(false); }} />
+        <NavBtn icon={Heart} label="Saved" active={tab === "follow"} onClick={() => { setTab("follow"); setShowDetail(false); }} />
         <NavBtn icon={Store} label="My stand" active={tab === "desk"} onClick={() => { setTab("desk"); setShowDetail(false); }} />
       </nav>
     </main>

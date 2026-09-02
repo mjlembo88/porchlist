@@ -41,6 +41,8 @@ type StandRow = {
   cashapp_cashtag: string | null;
   paypal_me_slug: string | null;
   pickup_windows: string | null;
+  rating_avg?: number | string | null;
+  review_count?: number | string | null;
 };
 
 export function fromRow(row: StandRow): FarmStand {
@@ -80,6 +82,8 @@ export function fromRow(row: StandRow): FarmStand {
     cashappCashtag: row.cashapp_cashtag,
     paypalMeSlug: row.paypal_me_slug,
     pickupWindows: row.pickup_windows,
+    ratingAvg: Number(row.rating_avg ?? 0),
+    reviewCount: Number(row.review_count ?? 0),
   };
 }
 
@@ -121,24 +125,121 @@ export async function ensureSeeded() {
       ]);
     }
   }
-  const itemN = await sql.query<{ n: number }>("select count(*)::int as n from items");
-  if ((itemN[0]?.n ?? 0) === 0) {
-    const seedItems: [string, string, string, number, boolean][] = [
-      ["beasley-farms", "U-pick bouquet", "bunch", 1200, false],
-      ["beasley-farms", "Tomatoes", "lb", 350, false],
-      ["three-dog-farm", "Eggs", "dozen", 600, true],
-      ["three-dog-farm", "Tomatoes", "lb", 300, false],
-      ["three-dog-farm", "Basil", "bunch", 300, false],
-      ["the-storehouse", "Sourdough", "each", 800, true],
-      ["the-storehouse", "Focaccia", "each", 900, true],
-      ["moore-market", "Eggs", "dozen", 650, true],
-      ["moore-market", "Honey", "pint", 1200, true],
-    ];
-    for (const [standId, name, unit, cents, pre] of seedItems) {
+  const seedItems: [string, string, string, number, boolean, number][] = [
+    ["beasley-farms", "U-pick bouquet", "bunch", 1200, false, 18],
+    ["beasley-farms", "Tomatoes", "lb", 350, false, 24],
+    ["beasley-farms", "Sunflowers", "bunch", 800, true, 12],
+    ["three-dog-farm", "Eggs", "dozen", 600, true, 14],
+    ["three-dog-farm", "Tomatoes", "lb", 300, false, 20],
+    ["three-dog-farm", "Basil", "bunch", 300, false, 8],
+    ["three-dog-farm", "Cucumber", "each", 150, false, 30],
+    ["the-storehouse", "Sourdough", "each", 800, true, 10],
+    ["the-storehouse", "Focaccia", "each", 900, true, 8],
+    ["moore-market", "Eggs", "dozen", 650, true, 16],
+    ["moore-market", "Honey", "pint", 1200, true, 6],
+    ["casa-pan", "Country loaf", "each", 700, false, 9],
+    ["casa-pan", "Jam jar", "jar", 850, false, 11],
+    ["southern-sunshine-farms", "Blueberries", "pint", 700, false, 15],
+    ["the-daily-rise", "Morning bun", "each", 450, true, 12],
+  ];
+  for (const [standId, name, unit, cents, pre, qty] of seedItems) {
+    const id = `seed-${standId}-${name.toLowerCase().replace(/\s+/g, "-")}`;
+    await sql.query(
+      `insert into items (id, stand_id, name, unit, price_cents, status, preorderable, decrement_on_sale, max_qty)
+       values ($1,$2,$3,$4,$5,'in',$6,true,$7)
+       on conflict (id) do update set
+         name = excluded.name, unit = excluded.unit, price_cents = excluded.price_cents,
+         preorderable = excluded.preorderable, max_qty = excluded.max_qty`,
+      [id, standId, name, unit, cents, pre, qty],
+    );
+  }
+
+  const seedReviews: [string, string, string, number, string][] = [
+    ["rev-td-mara", "three-dog-farm", "Mara", 5, "Tomatoes still warm. Honor box was stocked."],
+    ["rev-td-jon", "three-dog-farm", "Jon", 4, "Eggs gone by 10. Basil was perfect."],
+    ["rev-td-lee", "three-dog-farm", "Lee", 5, "Cucumbers snapped. Easy pin, easy parking."],
+    ["rev-beasley-tess", "beasley-farms", "Tess", 5, "U-pick bouquet lasted a week."],
+    ["rev-beasley-cal", "beasley-farms", "Cal", 4, "Saturday line moves. Cash in the tin."],
+    ["rev-moore-ana", "moore-market", "Ana", 5, "Honey and a dozen. Kids loved the eggs."],
+    ["rev-store-bill", "the-storehouse", "Bill", 5, "Sourdough crust sang. Preordered for Sunday."],
+    ["rev-casa-kim", "casa-pan", "Kim", 4, "Cookies and jam. Small porch, easy to miss."],
+    ["rev-sun-pat", "southern-sunshine-farms", "Pat", 5, "Blueberry pints were full. Worth the drive."],
+    ["rev-rise-nia", "the-daily-rise", "Nia", 5, "Morning bun still warm at 10."],
+  ];
+  for (const [id, standId, nickname, rating, body] of seedReviews) {
+    await sql.query(
+      `insert into reviews (id, stand_id, nickname, rating, body) values ($1,$2,$3,$4,$5)
+       on conflict (id) do nothing`,
+      [id, standId, nickname, rating, body],
+    );
+  }
+
+  const seedTickets: {
+    id: string; standId: string; source: string; status: string; name: string;
+    window: string; note: string | null; total: number;
+    lines: [string, string, string, number, number][];
+  }[] = [
+    {
+      id: "tkt-td-jess",
+      standId: "three-dog-farm",
+      source: "walkup",
+      status: "open",
+      name: "Jess",
+      window: "Today · walk-up",
+      note: "Pay at pickup",
+      total: 600,
+      lines: [["Eggs", "dozen", "seed-three-dog-farm-eggs", 1, 600]],
+    },
+    {
+      id: "tkt-td-mara",
+      standId: "three-dog-farm",
+      source: "preorder",
+      status: "accepted",
+      name: "Mara",
+      window: "Sat 8–noon",
+      note: "Leave on the porch if we miss each other",
+      total: 900,
+      lines: [
+        ["Tomatoes", "lb", "seed-three-dog-farm-tomatoes", 2, 300],
+        ["Basil", "bunch", "seed-three-dog-farm-basil", 1, 300],
+      ],
+    },
+    {
+      id: "tkt-td-jon",
+      standId: "three-dog-farm",
+      source: "preorder",
+      status: "paid",
+      name: "Jon",
+      window: "Sun 9–1",
+      note: null,
+      total: 1200,
+      lines: [["Eggs", "dozen", "seed-three-dog-farm-eggs", 2, 600]],
+    },
+    {
+      id: "tkt-store-bill",
+      standId: "the-storehouse",
+      source: "preorder",
+      status: "open",
+      name: "Bill",
+      window: "Sun 9–1",
+      note: "Sourdough if still warm",
+      total: 1600,
+      lines: [["Sourdough", "each", "seed-the-storehouse-sourdough", 2, 800]],
+    },
+  ];
+  for (const t of seedTickets) {
+    await sql.query(
+      `insert into tickets (id, stand_id, source, status, customer_name, pickup_window, note, total_cents)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
+       on conflict (id) do nothing`,
+      [t.id, t.standId, t.source, t.status, t.name, t.window, t.note, t.total],
+    );
+    for (const [name, unit, itemId, qty, cents] of t.lines) {
       await sql.query(
-        `insert into items (id, stand_id, name, unit, price_cents, status, preorderable, decrement_on_sale)
-         values ($1,$2,$3,$4,$5,'in',$6,true)`,
-        [`seed-${standId}-${name.toLowerCase().replace(/\s+/g, "-")}`, standId, name, unit, cents, pre],
+        `insert into ticket_lines (id, ticket_id, item_id, name, unit, qty, price_cents)
+         values ($1,$2,$3,$4,$5,$6,$7)
+         on conflict (id) do nothing`,
+        [`${t.id}-${name.toLowerCase()}`, t.id, itemId, name, unit, qty, cents],
       );
     }
   }
@@ -180,7 +281,11 @@ export async function ensureSeeded() {
   seeded = true;
 }
 
-const SELECT = `select s.*, (select sp.body from specials sp where sp.stand_id = s.id order by sp.created_at desc limit 1) as latest_special from stands s`;
+const SELECT = `select s.*,
+  (select sp.body from specials sp where sp.stand_id = s.id order by sp.created_at desc limit 1) as latest_special,
+  coalesce((select avg(r.rating)::float from reviews r where r.stand_id = s.id and r.hidden = false), 0) as rating_avg,
+  coalesce((select count(*)::int from reviews r where r.stand_id = s.id and r.hidden = false), 0) as review_count
+from stands s`;
 
 export const listStands = createServerFn({ method: "GET" }).handler(async () => {
   await ensureSeeded();

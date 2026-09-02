@@ -1,4 +1,5 @@
 import { Heart } from "lucide-react";
+import { Stars } from "@/components/stars";
 import { Button } from "@/components/ui/button";
 import { useLocal } from "@/lib/stands/local";
 import type { FarmStand } from "@/lib/stands/types";
@@ -34,6 +35,7 @@ export function FollowingFeed({
           <li key={s.id} className="flex items-start justify-between gap-3 py-3">
             <button type="button" className="min-w-0 text-left" onClick={() => onOpen(s.id)}>
               <p className="font-medium">{s.name}</p>
+              <Stars value={s.ratingAvg} count={s.reviewCount} />
               <p className="text-xs text-muted">{s.city ?? "Area"} · {s.hours ?? "Hours not listed"}</p>
               {s.latestSpecial && <p className="mt-1 text-sm">{s.latestSpecial}</p>}
             </button>

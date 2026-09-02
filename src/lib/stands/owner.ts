@@ -4,7 +4,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { parseIncomingList, UNITS, type SuggestedItem } from "@/lib/inventory/parse-list";
 import { canUseInventory, isFeaturedPlan, normalizePlan, type PlanId } from "@/lib/billing/plans";
-import type { InventoryItem, OwnedStand, PendingAccess, Ticket } from "./types";
+import { DEMO_STAND_ID, mapTicketStatus, type InventoryItem, type OwnedStand, type PendingAccess, type Ticket, type TicketStatus } from "./types";
 
 async function assertOwner(standId: string, userId: string) {
   const sql = await getSql();
@@ -439,52 +439,56 @@ export const listOwnerInbox = createServerFn({ method: "GET" })
     return rows.map((r) => ({ id: r.id, nickname: r.nickname, body: r.body, createdAt: r.created_at }));
   });
 
+async function fetchTickets(sql: Awaited<ReturnType<typeof getSql>>, standId: string): Promise<Ticket[]> {
+  const tickets = await sql.query<{
+    id: string; stand_id: string; source: string; status: string; customer_name: string | null;
+    pickup_window: string | null; note: string | null; discount_cents: number; tax_cents: number;
+    custom_cents: number; custom_label: string | null; tender: string | null; tendered_cents: number | null;
+    change_cents: number | null; total_cents: number; received_at: string | null; created_at: string;
+  }>(
+    `select id, stand_id, source, status, customer_name, pickup_window, note, discount_cents, tax_cents,
+            custom_cents, custom_label, tender, tendered_cents, change_cents, total_cents,
+            received_at::text as received_at, created_at::text as created_at
+     from tickets where stand_id = $1 order by created_at desc limit 80`,
+    [standId],
+  );
+  if (tickets.length === 0) return [];
+  const lines = await sql.query<{
+    id: string; ticket_id: string; item_id: string | null; name: string; unit: string | null; qty: number; price_cents: number;
+  }>(
+    `select id, ticket_id, item_id, name, unit, qty, price_cents from ticket_lines where ticket_id = any($1::text[])`,
+    [tickets.map((tk) => tk.id)],
+  );
+  return tickets.map((t): Ticket => ({
+    id: t.id,
+    standId: t.stand_id,
+    source: t.source === "preorder" ? "preorder" : "walkup",
+    status: mapTicketStatus(t.status),
+    customerName: t.customer_name,
+    pickupWindow: t.pickup_window,
+    note: t.note,
+    discountCents: Number(t.discount_cents),
+    taxCents: Number(t.tax_cents),
+    customCents: Number(t.custom_cents),
+    customLabel: t.custom_label,
+    tender: t.tender,
+    tenderedCents: t.tendered_cents == null ? null : Number(t.tendered_cents),
+    changeCents: t.change_cents == null ? null : Number(t.change_cents),
+    totalCents: Number(t.total_cents),
+    receivedAt: t.received_at,
+    createdAt: t.created_at,
+    lines: lines.filter((l) => l.ticket_id === t.id).map((l) => ({
+      id: l.id, itemId: l.item_id, name: l.name, unit: l.unit, qty: Number(l.qty), priceCents: Number(l.price_cents),
+    })),
+  }));
+}
+
 export const listTickets = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator(z.object({ standId: z.string() }))
   .handler(async ({ context, data }) => {
     const sql = await assertOwner(data.standId, context.userId);
-    const tickets = await sql.query<{
-      id: string; stand_id: string; source: string; status: string; customer_name: string | null;
-      pickup_window: string | null; note: string | null; discount_cents: number; tax_cents: number;
-      custom_cents: number; custom_label: string | null; tender: string | null; tendered_cents: number | null;
-      change_cents: number | null; total_cents: number; received_at: string | null; created_at: string;
-    }>(
-      `select id, stand_id, source, status, customer_name, pickup_window, note, discount_cents, tax_cents,
-              custom_cents, custom_label, tender, tendered_cents, change_cents, total_cents,
-              received_at::text as received_at, created_at::text as created_at
-       from tickets where stand_id = $1 order by created_at desc limit 80`,
-      [data.standId],
-    );
-    if (tickets.length === 0) return [];
-    const lines = await sql.query<{
-      id: string; ticket_id: string; item_id: string | null; name: string; unit: string | null; qty: number; price_cents: number;
-    }>(
-      `select id, ticket_id, item_id, name, unit, qty, price_cents from ticket_lines where ticket_id = any($1::text[])`,
-      [tickets.map((tk) => tk.id)],
-    );
-    return tickets.map((t): Ticket => ({
-      id: t.id,
-      standId: t.stand_id,
-      source: t.source === "preorder" ? "preorder" : "walkup",
-      status: t.status === "paid" || t.status === "void" ? t.status : "open",
-      customerName: t.customer_name,
-      pickupWindow: t.pickup_window,
-      note: t.note,
-      discountCents: Number(t.discount_cents),
-      taxCents: Number(t.tax_cents),
-      customCents: Number(t.custom_cents),
-      customLabel: t.custom_label,
-      tender: t.tender,
-      tenderedCents: t.tendered_cents == null ? null : Number(t.tendered_cents),
-      changeCents: t.change_cents == null ? null : Number(t.change_cents),
-      totalCents: Number(t.total_cents),
-      receivedAt: t.received_at,
-      createdAt: t.created_at,
-      lines: lines.filter((l) => l.ticket_id === t.id).map((l) => ({
-        id: l.id, itemId: l.item_id, name: l.name, unit: l.unit, qty: Number(l.qty), priceCents: Number(l.price_cents),
-      })),
-    }));
+    return fetchTickets(sql, data.standId);
   });
 
 const lineZ = z.object({
@@ -495,34 +499,99 @@ const lineZ = z.object({
   priceCents: z.number().int().min(0),
 });
 
-export const placePreorder = createServerFn({ method: "POST" })
-  .validator(z.object({
-    standId: z.string(),
-    customerName: z.string().min(1).max(60),
-    pickupWindow: z.string().max(80),
-    note: z.string().max(200).optional(),
-    phone: z.string().max(40).optional(),
-    lines: z.array(lineZ).min(1),
-  }))
+const orderInput = z.object({
+  standId: z.string(),
+  customerName: z.string().min(1).max(60),
+  pickupWindow: z.string().max(80),
+  note: z.string().max(200).optional(),
+  phone: z.string().max(40).optional(),
+  source: z.enum(["walkup", "preorder"]).default("preorder"),
+  lines: z.array(lineZ).min(1),
+});
+
+async function insertOrder(
+  sql: Awaited<ReturnType<typeof getSql>>,
+  data: z.infer<typeof orderInput>,
+) {
+  const stand = await sql.query<{ id: string }>(`select id from stands where id = $1`, [data.standId]);
+  if (!stand[0]) throw new Error("Stand not found");
+  const customerId = await rememberCustomer(sql, data.customerName.trim(), data.standId, data.phone);
+  const id = crypto.randomUUID();
+  const total = data.lines.reduce((s, l) => s + l.qty * l.priceCents, 0);
+  const source = data.source === "walkup" ? "walkup" : "preorder";
+  await sql.query(
+    `insert into tickets (id, stand_id, source, status, customer_name, pickup_window, note, total_cents, customer_id)
+     values ($1,$2,$3,'open',$4,$5,$6,$7,$8)`,
+    [id, data.standId, source, data.customerName.trim(), data.pickupWindow, data.note ?? null, total, customerId],
+  );
+  for (const l of data.lines) {
+    await sql.query(
+      `insert into ticket_lines (id, ticket_id, item_id, name, unit, qty, price_cents) values ($1,$2,$3,$4,$5,$6,$7)`,
+      [crypto.randomUUID(), id, l.itemId, l.name, l.unit, l.qty, l.priceCents],
+    );
+    if (!l.itemId) continue;
+    const item = await sql.query<{ max_qty: number | null; decrement_on_sale: boolean }>(
+      `select max_qty, decrement_on_sale from items where id = $1 and stand_id = $2`,
+      [l.itemId, data.standId],
+    );
+    const row = item[0];
+    if (!row || !row.decrement_on_sale || row.max_qty == null) continue;
+    const next = Math.max(0, Number(row.max_qty) - l.qty);
+    const status = next <= 0 ? "out" : next <= 2 ? "low" : "in";
+    await sql.query(`update items set max_qty = $2, status = $3 where id = $1`, [l.itemId, next, status]);
+  }
+  return { id, totalCents: total };
+}
+
+export const placeOrder = createServerFn({ method: "POST" })
+  .validator(orderInput)
   .handler(async ({ data }) => {
     const sql = await getSql();
-    const stand = await sql.query<{ id: string }>(`select id from stands where id = $1`, [data.standId]);
-    if (!stand[0]) throw new Error("Stand not found");
-    const customerId = await rememberCustomer(sql, data.customerName.trim(), data.standId, data.phone);
-    const id = crypto.randomUUID();
-    const total = data.lines.reduce((s, l) => s + l.qty * l.priceCents, 0);
-    await sql.query(
-      `insert into tickets (id, stand_id, source, status, customer_name, pickup_window, note, total_cents, customer_id)
-       values ($1,$2,'preorder','open',$3,$4,$5,$6,$7)`,
-      [id, data.standId, data.customerName.trim(), data.pickupWindow, data.note ?? null, total, customerId],
-    );
-    for (const l of data.lines) {
-      await sql.query(
-        `insert into ticket_lines (id, ticket_id, item_id, name, unit, qty, price_cents) values ($1,$2,$3,$4,$5,$6,$7)`,
-        [crypto.randomUUID(), id, l.itemId, l.name, l.unit, l.qty, l.priceCents],
-      );
-    }
-    return { id, totalCents: total };
+    return insertOrder(sql, data);
+  });
+
+export const placePreorder = createServerFn({ method: "POST" })
+  .validator(orderInput.omit({ source: true }))
+  .handler(async ({ data }) => {
+    const sql = await getSql();
+    return insertOrder(sql, { ...data, source: "preorder" });
+  });
+
+async function applyOrderStatus(
+  sql: Awaited<ReturnType<typeof getSql>>,
+  standId: string,
+  ticketId: string,
+  next: TicketStatus,
+) {
+  const rows = await sql.query<{ id: string; status: string }>(
+    `select id, status from tickets where id = $1 and stand_id = $2`,
+    [ticketId, standId],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("Order not found");
+  const cur = mapTicketStatus(row.status);
+  if (next === "accepted" && cur !== "open") throw new Error("Only new orders can be accepted");
+  if (next === "paid" && cur !== "open" && cur !== "accepted") throw new Error("Only open orders can be fulfilled");
+  if (next === "void" && cur !== "open" && cur !== "accepted") throw new Error("Already closed");
+  const tender = next === "paid" ? "pickup" : next === "void" ? "void" : null;
+  await sql.query(
+    `update tickets set status = $3, tender = coalesce($4, tender), received_at = case when $3 = 'paid' then now() else received_at end
+     where id = $1 and stand_id = $2`,
+    [ticketId, standId, next, tender],
+  );
+  return { ok: true };
+}
+
+export const updateOrderStatus = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({
+    standId: z.string(),
+    ticketId: z.string(),
+    status: z.enum(["accepted", "paid", "void"]),
+  }))
+  .handler(async ({ context, data }) => {
+    const sql = await assertOwner(data.standId, context.userId);
+    return applyOrderStatus(sql, data.standId, data.ticketId, data.status);
   });
 
 export const markPreorderPicked = createServerFn({ method: "POST" })
@@ -530,16 +599,7 @@ export const markPreorderPicked = createServerFn({ method: "POST" })
   .validator(z.object({ standId: z.string(), ticketId: z.string() }))
   .handler(async ({ context, data }) => {
     const sql = await assertOwner(data.standId, context.userId);
-    const rows = await sql.query<{ id: string }>(
-      `select id from tickets where id = $1 and stand_id = $2 and source = 'preorder' and status = 'open'`,
-      [data.ticketId, data.standId],
-    );
-    if (!rows[0]) throw new Error("Preorder not found");
-    await sql.query(
-      `update tickets set status = 'paid', tender = 'preorder', received_at = now() where id = $1 and stand_id = $2`,
-      [data.ticketId, data.standId],
-    );
-    return { ok: true };
+    return applyOrderStatus(sql, data.standId, data.ticketId, "paid");
   });
 
 export const socialCaption = createServerFn({ method: "GET" })
@@ -563,6 +623,67 @@ export const socialCaption = createServerFn({ method: "GET" })
         : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
     const s = stand[0];
     return {
-      caption: `${list} at ${s?.name ?? "the stand"} today${s?.city ? ` in ${s.city}` : ""}.\n${s?.hours ?? "Hours on the board."}\n\nStand strong and Farm on.\nStandLocal — local farm stands near you.`,
+      caption: `${list} at ${s?.name ?? "the stand"} today${s?.city ? ` in ${s.city}` : ""}.\n${s?.hours ?? "Hours on the board."}\n\nStand strong and Farm on.\nStandStrong — farm stands near you.`,
     };
+  });
+
+async function assertDemoStand(standId: string) {
+  if (standId !== DEMO_STAND_ID) throw new Error("Demo desk is only for Three Dog Farm");
+  return getSql();
+}
+
+export const listDemoItems = createServerFn({ method: "GET" })
+  .validator(z.object({ standId: z.string() }))
+  .handler(async ({ data }) => {
+    const sql = await assertDemoStand(data.standId);
+    const rows = await sql.query<Parameters<typeof itemFrom>[0]>(
+      `select id, stand_id, name, unit, price_cents, status, photo, preorderable, max_qty, decrement_on_sale from items where stand_id = $1 order by sort_order, name`,
+      [data.standId],
+    );
+    return rows.map(itemFrom);
+  });
+
+export const upsertDemoItem = createServerFn({ method: "POST" })
+  .validator(itemInput)
+  .handler(async ({ data }) => {
+    const sql = await assertDemoStand(data.standId);
+    const id = data.id ?? crypto.randomUUID();
+    await sql.query(
+      `insert into items (id, stand_id, name, unit, price_cents, status, photo, preorderable, max_qty, decrement_on_sale)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       on conflict (id) do update set name = excluded.name, unit = excluded.unit, price_cents = excluded.price_cents,
+         status = excluded.status, photo = excluded.photo, preorderable = excluded.preorderable,
+         max_qty = excluded.max_qty, decrement_on_sale = excluded.decrement_on_sale`,
+      [
+        id, data.standId, data.name.trim(), data.unit, data.priceCents, data.status,
+        data.photo ?? null, data.preorderable, data.maxQty ?? null, data.decrementOnSale,
+      ],
+    );
+    return { id };
+  });
+
+export const removeDemoItem = createServerFn({ method: "POST" })
+  .validator(z.object({ standId: z.string(), id: z.string() }))
+  .handler(async ({ data }) => {
+    const sql = await assertDemoStand(data.standId);
+    await sql.query(`delete from items where id = $1 and stand_id = $2`, [data.id, data.standId]);
+    return { ok: true };
+  });
+
+export const listDemoTickets = createServerFn({ method: "GET" })
+  .validator(z.object({ standId: z.string() }))
+  .handler(async ({ data }) => {
+    const sql = await assertDemoStand(data.standId);
+    return fetchTickets(sql, data.standId);
+  });
+
+export const updateDemoOrder = createServerFn({ method: "POST" })
+  .validator(z.object({
+    standId: z.string(),
+    ticketId: z.string(),
+    status: z.enum(["accepted", "paid", "void"]),
+  }))
+  .handler(async ({ data }) => {
+    const sql = await assertDemoStand(data.standId);
+    return applyOrderStatus(sql, data.standId, data.ticketId, data.status);
   });

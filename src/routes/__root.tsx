@@ -1,10 +1,8 @@
-import { createRootRoute, HeadContent, Outlet, Scripts, useRouterState } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
-import { StandCalc } from "@/components/stand-calc";
 import appCss from "../styles.css?url";
-
-const APP_NAME = "StandLocal";
+import { APP_NAME } from "@/lib/stands/types";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -15,7 +13,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#2F4A38" },
       {
         name: "description",
-        content: "Stand strong and Farm on. Local farm stands near you — Tampa Bay, Pasco, Hernando, and Pinellas.",
+        content: "StandStrong — Yelp × Etsy for farm stands. Browse, review, and preorder pickup in Pasco, Hernando, and north Pinellas.",
       },
     ],
     links: [
@@ -39,21 +37,10 @@ export const Route = createRootRoute({
       <body className="font-sans bg-paper text-ink">
         <PreviewHostBridge />
         <AuthProvider>
-          <RootChrome />
+          <Outlet />
         </AuthProvider>
         <Scripts />
       </body>
     </html>
   ),
 });
-
-function RootChrome() {
-  const path = useRouterState({ select: (s) => s.location.pathname });
-  const hideCalc = path === "/login" || path === "/admin";
-  return (
-    <>
-      <Outlet />
-      {!hideCalc && <StandCalc />}
-    </>
-  );
-}

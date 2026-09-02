@@ -68,7 +68,7 @@ export function AdminDesk() {
           }
         }}
       >
-        <h1 className="font-display text-3xl font-semibold">StandLocal admin</h1>
+        <h1 className="font-display text-3xl font-semibold">StandStrong admin</h1>
         <p className="text-sm text-muted">PIN for the app desk. Not owner sign-in.</p>
         <Input type="password" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} autoFocus />
         {err && <p className="text-sm text-rust">{err}</p>}

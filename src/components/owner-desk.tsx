@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { InventoryDesk } from "@/components/inventory-desk";
+import { OrderQueue, QueueBadge } from "@/components/order-queue";
 import { PAID_PLANS, PLANS, canUseInventory, planMeta } from "@/lib/billing/plans";
-import { formatMoney } from "@/lib/pay/links";
 import {
-  listMyAccess, listOwnerInbox, listTickets, markPreorderPicked, postFollowerNote, postSpecial,
-  requestStandAccess, savePaySettings, socialCaption, subscribePlan,
+  listDemoTickets, listMyAccess, listTickets, postFollowerNote, postSpecial,
+  requestStandAccess, savePaySettings, socialCaption, subscribePlan, updateDemoOrder, updateOrderStatus,
 } from "@/lib/stands/owner";
-import type { FarmStand, OwnedStand, PendingAccess, Ticket } from "@/lib/stands/types";
+import { DEMO_STAND_ID, type FarmStand, type OwnedStand, type PendingAccess, type Ticket, type TicketStatus } from "@/lib/stands/types";
 
 export function OwnerDesk({
   stands, onOpen, onRefresh, requestStandId, onClearRequest,
@@ -23,21 +23,37 @@ export function OwnerDesk({
   onClearRequest?: () => void;
 }) {
   const { user, isPending } = useCurrentUserState();
+  const [demo, setDemo] = useState(false);
   const navigate = useNavigate();
   if (isPending) return <div className="h-24 animate-pulse rounded-2xl bg-chip" />;
+  if (demo && !user) {
+    return (
+      <DemoDesk
+        stands={stands}
+        onOpen={onOpen}
+        onRefresh={onRefresh}
+        onExit={() => setDemo(false)}
+      />
+    );
+  }
   return (
     <>
       <SignedOut>
-        <div className="mx-auto max-w-sm py-8 pb-24">
+        <div className="mx-auto max-w-sm py-4">
           <h2 className="font-display text-2xl font-semibold">Run your stand</h2>
           <p className="mt-2 text-sm text-muted">
-            Sign in to manage listings StandLocal has granted you. One account can run more than one stand. Shoppers never need an account.
+            Post inventory, accept pickups, fulfill preorders. Shoppers never need an account.
           </p>
-          <Link to="/login" search={{ next: "/" }} className="mt-4 flex h-14 items-center justify-center rounded-2xl bg-forest text-paper">Owner sign in</Link>
+          <Button className="mt-4 h-12 w-full" onClick={() => setDemo(true)}>
+            Open the demo desk
+          </Button>
+          <Link to="/login" search={{ next: "/" }} className="mt-2 flex h-12 items-center justify-center rounded-[10px] border border-border bg-surface text-sm">
+            Owner sign in
+          </Link>
           <button
             type="button"
             onClick={() => void navigate({ to: "/admin" })}
-            className="mt-2 flex h-14 w-full items-center justify-center rounded-2xl border border-border bg-surface text-ink"
+            className="mt-2 flex h-12 w-full items-center justify-center text-sm text-muted"
           >
             App admin
           </button>
@@ -58,6 +74,29 @@ export function OwnerDesk({
   );
 }
 
+function DemoDesk({
+  stands, onOpen, onRefresh, onExit,
+}: {
+  stands: FarmStand[];
+  onOpen: (id: string) => void;
+  onRefresh: () => void;
+  onExit: () => void;
+}) {
+  const stand = stands.find((s) => s.id === DEMO_STAND_ID) ?? stands[0];
+  if (!stand) return <p className="text-sm text-muted">Demo stand is not listed.</p>;
+  return (
+    <StandWorkspace
+      stand={stand}
+      guestDemo
+      onOpen={onOpen}
+      onRefresh={onRefresh}
+      headerRight={
+        <button type="button" className="text-sm text-muted" onClick={onExit}>Exit demo</button>
+      }
+    />
+  );
+}
+
 function OwnerSignedIn({
   stands, onOpen, onRefresh, requestStandId, onClearRequest,
 }: {
@@ -72,10 +111,7 @@ function OwnerSignedIn({
   const [standId, setStandId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [asking, setAsking] = useState(false);
-  const [tab, setTab] = useState<"inbox" | "board" | "stand">("inbox");
-  const [caption, setCaption] = useState("");
   const stand = stands.find((s) => s.id === standId) ?? null;
-  const paid = stand ? canUseInventory(stand.plan) : false;
 
   async function reloadAccess() {
     const r = await listMyAccess();
@@ -106,7 +142,7 @@ function OwnerSignedIn({
     return (
       <div className="flex flex-col gap-4">
         <PendingList pending={pending} />
-        <Button type="button" variant="outline" className="h-14 max-w-md" onClick={() => setAsking(true)}>
+        <Button type="button" variant="outline" className="h-12 max-w-md" onClick={() => setAsking(true)}>
           Request another listing
         </Button>
       </div>
@@ -145,53 +181,128 @@ function OwnerSignedIn({
     );
   }
 
+  return (
+    <StandWorkspace
+      stand={stand}
+      owned={owned}
+      pending={pending}
+      onSwitch={setStandId}
+      onAsk={() => setAsking(true)}
+      onOpen={onOpen}
+      onRefresh={onRefresh}
+      headerRight={<UserButton />}
+    />
+  );
+}
+
+function StandWorkspace({
+  stand, owned, pending, onSwitch, onAsk, onOpen, onRefresh, guestDemo = false, headerRight,
+}: {
+  stand: FarmStand;
+  owned?: OwnedStand[];
+  pending?: PendingAccess[];
+  onSwitch?: (id: string) => void;
+  onAsk?: () => void;
+  onOpen: (id: string) => void;
+  onRefresh: () => void;
+  guestDemo?: boolean;
+  headerRight?: ReactNode;
+}) {
+  const [tab, setTab] = useState<"orders" | "stock" | "stand">("orders");
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const paid = guestDemo || canUseInventory(stand.plan);
   const meta = planMeta(stand.plan);
+  const openCount = tickets.filter((t) => t.status === "open" || t.status === "accepted").length;
+
+  async function reloadTickets() {
+    try {
+      const all = guestDemo
+        ? await listDemoTickets({ data: { standId: stand.id } })
+        : await listTickets({ data: { standId: stand.id } });
+      setTickets(all);
+      setErr("");
+    } catch {
+      setErr("Could not load orders.");
+    }
+  }
+
+  useEffect(() => {
+    void reloadTickets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stand.id, guestDemo]);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs uppercase tracking-wide text-muted">{meta.label} · {stand.city}</p>
-          <h2 className="font-display text-xl font-semibold">{stand.name}</h2>
+          <p className="text-xs uppercase tracking-wide text-muted">
+            {guestDemo ? "Demo desk" : meta.label} · {stand.city}
+          </p>
+          <h2 className="truncate font-display text-xl font-semibold">{stand.name}</h2>
         </div>
-        <UserButton />
+        {headerRight}
       </div>
-      {owned.length > 1 && (
-        <label className="grid gap-1">
-          <span className="text-xs font-medium uppercase tracking-wide text-muted">Switch listing</span>
-          <select className="h-14 rounded-2xl border border-border bg-surface px-3" value={standId} onChange={(e) => setStandId(e.target.value)}>
-            {owned.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}{o.city ? ` · ${o.city}` : ""}</option>
-            ))}
-          </select>
-        </label>
+      {owned && owned.length > 1 && onSwitch && (
+        <select className="h-12 rounded-2xl border border-border bg-surface px-3 text-sm" value={stand.id} onChange={(e) => onSwitch(e.target.value)}>
+          {owned.map((o) => (
+            <option key={o.id} value={o.id}>{o.name}{o.city ? ` · ${o.city}` : ""}</option>
+          ))}
+        </select>
       )}
-      {pending.length > 0 && (
+      {pending && pending.length > 0 && (
         <p className="text-sm text-muted">Waiting on admin for {pending.map((p) => p.standName).join(", ")}.</p>
       )}
-      <Button type="button" variant="outline" className="h-14" onClick={() => setAsking(true)}>
-        Request another listing
-      </Button>
-      <div className="flex flex-wrap gap-2">
-        {([["inbox", "Inbox"], ["board", "Board"], ["stand", "Stand"]] as const).map(([id, label]) => (
+      <div className="flex gap-1 rounded-full bg-chip p-1">
+        {([
+          ["orders", "Orders"],
+          ["stock", "Stock"],
+          ["stand", "Stand"],
+        ] as const).map(([id, label]) => (
           <button
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={tab === id ? "h-11 rounded-full bg-ink px-4 text-sm text-paper" : "h-11 rounded-full bg-chip px-4 text-sm"}
+            className={tab === id ? "h-10 flex-1 rounded-full bg-ink text-sm text-paper" : "h-10 flex-1 rounded-full text-sm text-muted"}
           >
             {label}
+            {id === "orders" ? <QueueBadge count={openCount} /> : null}
           </button>
         ))}
       </div>
-      {tab === "inbox" && <OwnerInbox standId={stand.id} />}
-      {tab === "board" && (
+      {tab === "orders" && (
+        err
+          ? <p className="text-sm text-rust">{err}</p>
+          : (
+            <OrderQueue
+              tickets={tickets}
+              busy={busy}
+              onStatus={async (ticketId, status: TicketStatus) => {
+                if (status === "open") return;
+                setBusy(true);
+                try {
+                  if (guestDemo) await updateDemoOrder({ data: { standId: stand.id, ticketId, status } });
+                  else await updateOrderStatus({ data: { standId: stand.id, ticketId, status } });
+                  await reloadTickets();
+                } finally { setBusy(false); }
+              }}
+            />
+          )
+      )}
+      {tab === "stock" && (
         paid
-          ? <InventoryDesk standId={stand.id} onRefresh={onRefresh} />
-          : <LockedPaywall stand={stand} onRefresh={onRefresh} title="Today's board" body="Publishing the chalkboard and a preorder sheet starts on Basic — $5/month. Shoppers can already tally any board that's live." />
+          ? <InventoryDesk standId={stand.id} onRefresh={onRefresh} guestDemo={guestDemo} />
+          : <LockedPaywall stand={stand} onRefresh={onRefresh} title="Stock" body="Posting name, price, qty, and unit starts on Basic — $5/month." />
       )}
       {tab === "stand" && (
-        <StandSettings stand={stand} onOpen={onOpen} onRefresh={onRefresh} caption={caption} setCaption={setCaption} />
+        <StandSettings
+          stand={stand}
+          onOpen={onOpen}
+          onRefresh={onRefresh}
+          onAsk={onAsk}
+          guestDemo={guestDemo}
+        />
       )}
     </div>
   );
@@ -204,7 +315,7 @@ function PendingList({ pending }: { pending: PendingAccess[] }) {
         <h2 className="font-display text-2xl font-semibold">Request sent</h2>
         <UserButton />
       </div>
-      <p className="mt-2 text-sm text-muted">Waiting on StandLocal to grant access. Nobody can take over a stand themselves.</p>
+      <p className="mt-2 text-sm text-muted">Waiting on StandStrong to grant access. Nobody can take over a stand themselves.</p>
       <ul className="mt-3 divide-y divide-border">
         {pending.map((p) => (
           <li key={p.id} className="py-2">
@@ -296,95 +407,13 @@ function RequestAccess({
       <Input placeholder="Phone (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} />
       <Textarea placeholder="How we can tell it's your stand" value={note} onChange={(e) => setNote(e.target.value)} />
       {err && <p className="text-sm text-rust">{err}</p>}
-      <Button className="h-14" type="submit" disabled={busy || !pick || lockedTaken}>Send to admin</Button>
+      <Button className="h-12" type="submit" disabled={busy || !pick || lockedTaken}>Send to admin</Button>
       {onCancel && (
-        <Button type="button" variant="ghost" className="h-14" onClick={onCancel}>
+        <Button type="button" variant="ghost" className="h-12" onClick={onCancel}>
           {alreadyOwner ? "Back to my stands" : "Cancel"}
         </Button>
       )}
     </form>
-  );
-}
-
-function OwnerInbox({ standId }: { standId: string }) {
-  const [rows, setRows] = useState<{ id: string; nickname: string; body: string; createdAt: string }[]>([]);
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function reload() {
-    const [inbox, all] = await Promise.all([
-      listOwnerInbox({ data: { standId } }),
-      listTickets({ data: { standId } }),
-    ]);
-    setRows(inbox);
-    setTickets(all.filter((t) => t.source === "preorder" && t.status === "open"));
-  }
-
-  useEffect(() => {
-    void reload().catch(() => setErr("Could not load inbox."));
-  }, [standId]);
-
-  if (err) return <p className="text-sm text-rust">{err}</p>;
-
-  return (
-    <div className="flex flex-col gap-5">
-      <section>
-        <h3 className="font-display text-lg font-semibold">Open preorders</h3>
-        {tickets.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No open preorders. Shoppers send them from the stand page.</p>
-        ) : (
-          <ul className="mt-2 divide-y divide-border">
-            {tickets.map((t) => (
-              <li key={t.id} className="py-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="font-medium">{t.customerName ?? "Neighbor"}</p>
-                  <p className="font-display text-lg tabular-nums">{formatMoney(t.totalCents)}</p>
-                </div>
-                <p className="text-xs text-muted">{t.pickupWindow ?? "Pickup window not set"} · {t.createdAt.replace("T", " ").slice(0, 16)}</p>
-                <ul className="mt-1 text-sm">
-                  {t.lines.map((l) => (
-                    <li key={l.id}>{l.qty} × {l.name}</li>
-                  ))}
-                </ul>
-                {t.note && <p className="mt-1 text-sm text-muted">{t.note}</p>}
-                <Button
-                  className="mt-2 h-12"
-                  disabled={busy}
-                  onClick={async () => {
-                    setBusy(true);
-                    try {
-                      await markPreorderPicked({ data: { standId, ticketId: t.id } });
-                      await reload();
-                    } finally { setBusy(false); }
-                  }}
-                >
-                  Got it · picked up
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      <section>
-        <h3 className="font-display text-lg font-semibold">Messages</h3>
-        {rows.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No messages yet. Shoppers write from the stand page.</p>
-        ) : (
-          <ul className="mt-2 divide-y divide-border">
-            {rows.map((m) => (
-              <li key={m.id} className="py-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-sm font-medium">{m.nickname}</p>
-                  <p className="text-xs text-muted">{m.createdAt.replace("T", " ").slice(0, 16)}</p>
-                </div>
-                <p className="mt-1 text-sm leading-relaxed">{m.body}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
   );
 }
 
@@ -426,10 +455,10 @@ function LockedPaywall({
 }
 
 function StandSettings({
-  stand, onOpen, onRefresh, caption, setCaption,
+  stand, onOpen, onRefresh, onAsk, guestDemo,
 }: {
   stand: FarmStand; onOpen: (id: string) => void; onRefresh: () => void;
-  caption: string; setCaption: (s: string) => void;
+  onAsk?: () => void; guestDemo?: boolean;
 }) {
   const [venmo, setVenmo] = useState(stand.venmoUsername ?? "");
   const [zelleH, setZelleH] = useState(stand.zelleHandle ?? "");
@@ -443,6 +472,7 @@ function StandSettings({
   const [spBody, setSpBody] = useState("");
   const [note, setNote] = useState("");
   const [saved, setSaved] = useState("");
+  const [caption, setCaption] = useState("");
 
   useEffect(() => {
     setVenmo(stand.venmoUsername ?? "");
@@ -462,67 +492,78 @@ function StandSettings({
   return (
     <div className="flex flex-col gap-4 pb-8">
       <div className="flex gap-2">
-        <Button variant="outline" className="flex-1" onClick={() => onOpen(stand.id)}>View on map</Button>
-        <Button variant="outline" className="flex-1" asChild>
+        <Button variant="outline" className="h-12 flex-1" onClick={() => onOpen(stand.id)}>View listing</Button>
+        <Button variant="outline" className="h-12 flex-1" asChild>
           <Link to="/stand/$id" params={{ id: stand.id }}>Stand page</Link>
         </Button>
       </div>
+      {onAsk && !guestDemo && (
+        <Button type="button" variant="ghost" className="h-12" onClick={onAsk}>Request another listing</Button>
+      )}
+
+      {!guestDemo && (
+        <section className="grid gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">Today's special</p>
+          <Input placeholder="Title" value={spTitle} onChange={(e) => setSpTitle(e.target.value)} />
+          <Textarea placeholder="What's on the porch" value={spBody} onChange={(e) => setSpBody(e.target.value)} className="min-h-20" />
+          <Button className="h-12" variant="outline" disabled={spTitle.trim().length < 2 || spBody.trim().length < 2} onClick={async () => {
+            await postSpecial({ data: { standId: stand.id, title: spTitle.trim(), body: spBody.trim() } });
+            setSpTitle(""); setSpBody(""); setSaved("Special posted."); onRefresh();
+          }}>Post to shoppers</Button>
+          <Textarea placeholder="Note to followers" value={note} onChange={(e) => setNote(e.target.value)} className="min-h-20" />
+          <Button className="h-12" variant="outline" disabled={note.trim().length < 2} onClick={async () => {
+            await postFollowerNote({ data: { standId: stand.id, body: note.trim() } });
+            setNote(""); setSaved("Followers will see this.");
+          }}>Send to following</Button>
+          {saved && <p className="text-sm text-forest">{saved}</p>}
+        </section>
+      )}
 
       <section className="grid gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">Today's special</p>
-        <Input placeholder="Title" value={spTitle} onChange={(e) => setSpTitle(e.target.value)} />
-        <Textarea placeholder="What's on the porch" value={spBody} onChange={(e) => setSpBody(e.target.value)} />
-        <Button className="h-14" variant="outline" disabled={spTitle.trim().length < 2 || spBody.trim().length < 2} onClick={async () => {
-          await postSpecial({ data: { standId: stand.id, title: spTitle.trim(), body: spBody.trim() } });
-          setSpTitle(""); setSpBody(""); setSaved("Special posted."); onRefresh();
-        }}>Post to shoppers</Button>
-        <Textarea placeholder="Note to followers" value={note} onChange={(e) => setNote(e.target.value)} />
-        <Button className="h-14" variant="outline" disabled={note.trim().length < 2} onClick={async () => {
-          await postFollowerNote({ data: { standId: stand.id, body: note.trim() } });
-          setNote(""); setSaved("Followers will see this.");
-        }}>Send to following</Button>
-        {saved && <p className="text-sm text-forest">{saved}</p>}
-      </section>
-
-      <section className="grid gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">Payment handles</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">Hours & pickup</p>
+        <Input placeholder="Hours" value={hours} onChange={(e) => setHours(e.target.value)} />
+        <Input placeholder="Pickup windows" value={windows} onChange={(e) => setWindows(e.target.value)} />
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">Pay-at-pickup handles (optional)</p>
         <Input placeholder="Venmo username" value={venmo} onChange={(e) => setVenmo(e.target.value)} />
         <Input placeholder="Zelle name" value={zelleH} onChange={(e) => setZelleH(e.target.value)} />
         <Input placeholder="Zelle phone or email" value={zelleD} onChange={(e) => setZelleD(e.target.value)} />
         <Input placeholder="Cash App $cashtag" value={cash} onChange={(e) => setCash(e.target.value)} />
         <Input placeholder="paypal.me slug" value={paypal} onChange={(e) => setPaypal(e.target.value)} />
-        <Input placeholder="Pickup windows" value={windows} onChange={(e) => setWindows(e.target.value)} />
-        <Input placeholder="Hours" value={hours} onChange={(e) => setHours(e.target.value)} />
-        <Button className="h-14" onClick={async () => {
-          await savePaySettings({
-            data: {
-              standId: stand.id, venmoUsername: venmo, zelleHandle: zelleH, zelleDestination: zelleD,
-              cashappCashtag: cash, paypalMeSlug: paypal, pickupWindows: windows, hours,
-            },
-          });
-          setSaved("Stand saved.");
-          onRefresh();
-        }}>Save stand</Button>
+        {!guestDemo && (
+          <Button className="h-12" onClick={async () => {
+            await savePaySettings({
+              data: {
+                standId: stand.id, venmoUsername: venmo, zelleHandle: zelleH, zelleDestination: zelleD,
+                cashappCashtag: cash, paypalMeSlug: paypal, pickupWindows: windows, hours,
+              },
+            });
+            setSaved("Stand saved.");
+            onRefresh();
+          }}>Save stand</Button>
+        )}
       </section>
 
-      <section className="grid gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">Plan · Stripe at launch</p>
-        <p className="text-sm text-muted">Shopper checkout is always on. Paid plans unlock posting the board and a preorder sheet.</p>
-        <PlanCards stand={stand} onRefresh={onRefresh} />
-      </section>
-
-      <Button className="h-14" variant="outline" onClick={async () => {
-        const r = await socialCaption({ data: { standId: stand.id } });
-        setCaption(r.caption);
-      }}>Caption from today's board</Button>
-      {caption && (
-        <div>
-          <pre className="whitespace-pre-wrap rounded-2xl bg-chip p-3 text-sm">{caption}</pre>
-          <Button className="mt-2 h-14 w-full" onClick={async () => {
-            await navigator.clipboard.writeText(caption);
-            setCopied(true);
-          }}>{copied ? "Copied" : "Copy caption"}</Button>
-        </div>
+      {!guestDemo && (
+        <>
+          <section className="grid gap-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">Plan · Stripe at launch</p>
+            <p className="text-sm text-muted">Shoppers stay free. Paid plans unlock posting stock.</p>
+            <PlanCards stand={stand} onRefresh={onRefresh} />
+          </section>
+          <Button className="h-12" variant="outline" onClick={async () => {
+            const r = await socialCaption({ data: { standId: stand.id } });
+            setCaption(r.caption);
+          }}>Caption from today's board</Button>
+          {caption && (
+            <div>
+              <pre className="whitespace-pre-wrap rounded-2xl bg-chip p-3 text-sm">{caption}</pre>
+              <Button className="mt-2 h-12 w-full" onClick={async () => {
+                await navigator.clipboard.writeText(caption);
+                setCopied(true);
+              }}>{copied ? "Copied" : "Copy caption"}</Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

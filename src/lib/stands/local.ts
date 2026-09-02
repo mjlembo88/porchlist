@@ -19,6 +19,6 @@ export const useLocal = create<LocalState>()(
       },
       setNickname: (nickname) => set({ nickname }),
     }),
-    { name: "standlocal-local" },
+    { name: "standstrong-local" },
   ),
 );

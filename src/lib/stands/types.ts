@@ -40,6 +40,8 @@ export type FarmStand = SeedStand & {
   cashappCashtag: string | null;
   paypalMeSlug: string | null;
   pickupWindows: string | null;
+  ratingAvg: number;
+  reviewCount: number;
 };
 
 export type InventoryItem = {
@@ -64,11 +66,13 @@ export type TicketLine = {
   priceCents: number;
 };
 
+export type TicketStatus = "open" | "accepted" | "paid" | "void";
+
 export type Ticket = {
   id: string;
   standId: string;
   source: "walkup" | "preorder";
-  status: "open" | "paid" | "void";
+  status: TicketStatus;
   customerName: string | null;
   pickupWindow: string | null;
   note: string | null;
@@ -160,9 +164,12 @@ export type AppFeatures = {
 
 export const KIND_LABEL: Record<StandKind, string> = {
   stand: "Farm stand",
-  bakery: "Porch bakery",
+  bakery: "Bakery",
   market: "Market",
 };
+
+export const DEMO_STAND_ID = "three-dog-farm";
+export const APP_NAME = "StandStrong";
 
 export const ACCESS_LABEL: Record<string, string> = {
   "walk-up": "Walk up",
@@ -173,7 +180,26 @@ export const ACCESS_LABEL: Record<string, string> = {
 };
 
 export const SLOGAN = "Stand strong and Farm on";
-export const TAGLINE = "Local farm stands near you";
+export const TAGLINE = "Farm stands near you";
+
+export function mapTicketStatus(raw: string): TicketStatus {
+  if (raw === "paid" || raw === "fulfilled") return "paid";
+  if (raw === "void" || raw === "declined") return "void";
+  if (raw === "accepted") return "accepted";
+  return "open";
+}
+
+export function ticketStatusLabel(status: TicketStatus) {
+  if (status === "open") return "New";
+  if (status === "accepted") return "Accepted";
+  if (status === "paid") return "Fulfilled";
+  return "Declined";
+}
+
+export function formatRating(avg: number) {
+  if (!Number.isFinite(avg) || avg <= 0) return "New";
+  return avg.toFixed(1);
+}
 
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
